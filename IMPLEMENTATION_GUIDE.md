@@ -1,1148 +1,112 @@
-# BMI & Health Tracker — Manual Deployment Guide
 
-**Complete step-by-step deployment guide with verification commands**
+# BMI & Health Tracker — AWS Ubuntu EC2 Deployment Guide
 
-This guide walks you through manually deploying the BMI & Health Tracker application on AWS EC2 Ubuntu. Each step includes verification commands to ensure everything is working correctly.
+This comprehensive guide walks you through deploying the **BMI & Health Tracker** full-stack application (React + Node.js + PostgreSQL) on a **fresh AWS Ubuntu EC2 server** using **Nginx** as a reverse proxy and static file server.
 
----
+## 🌟 Application Features
 
-## Table of Contents
-
-1. [Prerequisites](#prerequisites)
-2. [AWS EC2 Setup](#step-1-aws-ec2-setup)
-3. [Server Preparation](#step-2-server-preparation)
-4. [Install Node.js via NVM](#step-3-install-nodejs-via-nvm)
-5. [Install PostgreSQL](#step-4-install-postgresql)
-6. [Install Nginx](#step-5-install-nginx)
-7. [Install PM2](#step-6-install-pm2)
-8. [Database Configuration](#step-7-database-configuration)
-9. [Clone/Upload Project](#step-8-cloneupload-project)
-10. [Backend Configuration](#step-9-backend-configuration)
-11. [Deploy Backend](#step-10-deploy-backend)
-12. [Deploy Frontend](#step-11-deploy-frontend)
-13. [Configure PM2](#step-12-configure-pm2)
-14. [Configure Nginx](#step-13-configure-nginx)
-15. [Health Checks](#step-14-health-checks)
-16. [SSL/HTTPS (Optional)](#step-15-ssl-https-optional)
-17. [Troubleshooting](#troubleshooting)
+- **Health Metrics Calculation**: BMI, BMR (using Mifflin-St Jeor equation), and daily calorie needs
+- **Custom Measurement Dates**: Track measurements with specific dates (not just "now") - great for historical data
+- **30-Day BMI Trend Visualization**: Interactive charts showing your BMI progress over time
+- **Multiple Activity Levels**: From sedentary to very active lifestyle calculations
+- **Real-time Stats Dashboard**: Quick view of your current metrics and total measurements
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
 
 ---
 
 ## Prerequisites
 
-- ✅ AWS Account with EC2 access
-- ✅ SSH client (Terminal, PuTTY, or similar)
-- ✅ Basic Linux command knowledge
-- ✅ Domain name (optional, for HTTPS)
-- ✅ Project files ready (git repo or zip file)
+- AWS Account with EC2 access
+- Domain name (optional, but recommended for HTTPS)
+- SSH client (Terminal, PuTTY, or similar)
+- Basic knowledge of Linux commands
 
 ---
 
-## Step 1: AWS EC2 Setup
+## Part 1: AWS EC2 Setup
 
 ### 1.1 Launch EC2 Instance
 
-1. **AWS Console** → EC2 Dashboard → **Launch Instance**
-2. **Configuration:**
+1. **Sign in to AWS Console** → Navigate to EC2 Dashboard
+2. **Click "Launch Instance"**
+3. **Configure Instance:**
    - **Name**: `bmi-health-tracker-server`
-   - **AMI**: Ubuntu Server 22.04 LTS
-   - **Instance Type**: `t2.small` (minimum) or `t2.medium` (recommended)
-   - **Key Pair**: Create/select your `.pem` key
-   - **Storage**: 20 GB gp3
+   - **AMI**: Ubuntu Server 22.04 LTS (or latest LTS)
+   - **Instance Type**: `t2.micro` (free tier) or `t2.small` (recommended)
+   - **Key Pair**: Create new or use existing `.pem` key (download and save securely)
+   - **Network Settings**: 
+     - Create security group or use existing
+     - Allow SSH (port 22) from your IP
+     - Allow HTTP (port 80) from anywhere (0.0.0.0/0)
+     - Allow HTTPS (port 443) from anywhere (0.0.0.0/0) - if using SSL
+   - **Storage**: 20 GB gp3 (minimum 10 GB recommended)
+4. **Launch Instance** and wait for it to be in "Running" state
 
-3. **Security Group Rules:**
+### 1.2 Configure Security Group
 
-| Type  | Protocol | Port | Source    | Description      |
-|-------|----------|------|-----------|------------------|
-| SSH   | TCP      | 22   | My IP     | SSH access       |
-| HTTP  | TCP      | 80   | 0.0.0.0/0 | Web traffic      |
-| HTTPS | TCP      | 443  | 0.0.0.0/0 | Secure traffic   |
+Add these inbound rules to your security group:
 
-4. **Launch** and wait for "Running" status
+| Type  | Protocol | Port Range | Source    | Description           |
+|-------|----------|------------|-----------|-----------------------|
+| SSH   | TCP      | 22         | My IP     | SSH access            |
+| HTTP  | TCP      | 80         | 0.0.0.0/0 | HTTP web traffic      |
+| HTTPS | TCP      | 443        | 0.0.0.0/0 | HTTPS secure traffic  |
 
-### 1.2 Connect to Server
+### 1.3 Connect to EC2 Instance
 
 ```bash
-# Set key permissions (first time only)
+# Set permissions for your .pem file (first time only)
 chmod 400 your-key.pem
 
-# Connect
+# Connect via SSH
 ssh -i your-key.pem ubuntu@YOUR_EC2_PUBLIC_IP
 ```
 
-**✅ Verify:**
-```bash
-whoami        # Should show: ubuntu
-pwd           # Should show: /home/ubuntu
-uname -a      # Should show Ubuntu info
-```
+Replace `YOUR_EC2_PUBLIC_IP` with your instance's public IP from AWS Console.
 
 ---
 
-## Step 2: Server Preparation
+## Part 2: Server Preparation
 
-### 2.1 Update System
+### 2.1 Update System & Install Essential Tools
 
 ```bash
+# Update package lists and upgrade existing packages
 sudo apt update && sudo apt upgrade -y
+
+# Install essential build tools and utilities
+sudo apt install -y git curl wget build-essential nginx ufw ca-certificates gnupg
 ```
 
-**✅ Verify:**
-```bash
-sudo apt update
-# Should show: All packages are up to date
-```
-
-### 2.2 Install Essential Tools
-
-```bash
-sudo apt install -y git curl wget build-essential ca-certificates gnupg
-```
-
-**✅ Verify:**
-```bash
-git --version          # Should show git version
-curl --version         # Should show curl version
-gcc --version          # Should show gcc version
-```
-
----
-
-## Step 3: Install Node.js via NVM
-
-### 3.1 Install NVM
+### 2.2 Install Node.js via NVM (Node Version Manager)
 
 ```bash
 # Download and install NVM
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
 
-# Load NVM
+# Load NVM into current session
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-```
 
-**✅ Verify:**
-```bash
-command -v nvm        # Should show: nvm
-nvm --version         # Should show: 0.39.7
-```
-
-### 3.2 Install Node.js LTS
-
-```bash
-# Install Node.js
+# Install Node.js LTS version
 nvm install --lts
-nvm use --lts
-nvm alias default lts/*
+
+# Verify installation
+node -v   # Should show v20.x.x or similar
+npm -v    # Should show 10.x.x or similar
 ```
 
-**✅ Verify:**
-```bash
-node -v               # Should show: v20.x.x or v22.x.x
-npm -v                # Should show: 10.x.x or higher
-which node            # Should show path with .nvm
-```
+**Note**: If you disconnect and reconnect, NVM will auto-load via `.bashrc`.
 
 ---
 
-## Step 4: Install PostgreSQL
+## Part 3: PostgreSQL Database Setup
 
-### 4.1 Install PostgreSQL
+### 3.1 Install PostgreSQL
 
 ```bash
-sudo apt install -y postgresql postgresql-contrib
-```
-
-**✅ Verify:**
-```bash
-psql --version                    # Should show: psql (PostgreSQL) 14.x
-sudo systemctl status postgresql  # Should show: active (running)
-```
-
-### 4.2 Enable PostgreSQL Service
-
-```bash
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
-```
-
-**✅ Verify:**
-```bash
-sudo systemctl is-active postgresql    # Should show: active
-sudo systemctl is-enabled postgresql   # Should show: enabled
-```
-
----
-
-## Step 5: Install Nginx
-
-### 5.1 Install Nginx
-
-```bash
-sudo apt install -y nginx
-```
-
-**✅ Verify:**
-```bash
-nginx -v                         # Should show: nginx version
-sudo systemctl status nginx      # Should show: active (running)
-```
-
-### 5.2 Enable Nginx Service
-
-```bash
-sudo systemctl start nginx
-sudo systemctl enable nginx
-```
-
-**✅ Verify:**
-```bash
-curl http://localhost           # Should show Nginx welcome page
-```
-
----
-
-## Step 6: Install PM2
-
-### 6.1 Install PM2 Globally
-
-```bash
-npm install -g pm2
-```
-
-**✅ Verify:**
-```bash
-pm2 -v                          # Should show: 5.x.x
-which pm2                       # Should show path with .nvm
-```
-
----
-
-## Step 7: Database Configuration
-
-### 7.1 Choose Database Credentials
-
-**Decide on these values (you'll need them later):**
-- Database Name: `bmidb` (default)
-- Database User: `bmi_user` (default)
-- Database Password: `[choose a strong password]`
-
-### 7.2 Create Database and User
-
-```bash
-# Switch to postgres user
-sudo -u postgres psql
-```
-
-**Inside PostgreSQL prompt:**
-```sql
--- Create database
-CREATE DATABASE bmidb;
-
--- Create user with password (replace YOUR_PASSWORD)
-CREATE USER bmi_user WITH PASSWORD 'YOUR_PASSWORD';
-
--- Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE bmidb TO bmi_user;
-GRANT ALL ON SCHEMA public TO bmi_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO bmi_user;
-
--- Exit
-\q
-```
-
-**✅ Verify:**
-```bash
-# Check if database exists
-sudo -u postgres psql -l | grep bmidb
-
-# Check if user exists
-sudo -u postgres psql -c "SELECT 1 FROM pg_roles WHERE rolname='bmi_user'"
-```
-
-### 7.3 Configure pg_hba.conf for Password Authentication
-
-```bash
-# Find pg_hba.conf location
-sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file'
-
-# Backup original
-sudo cp /etc/postgresql/14/main/pg_hba.conf /etc/postgresql/14/main/pg_hba.conf.backup
-
-# Edit the file
-sudo nano /etc/postgresql/14/main/pg_hba.conf
-```
-
-**Add this line after `# IPv4 local connections:`**
-```
-host    bmidb    bmi_user    127.0.0.1/32    md5
-```
-
-**Save:** `Ctrl+O`, `Enter`, `Ctrl+X`
-
-### 7.4 Reload PostgreSQL
-
-```bash
-sudo systemctl reload postgresql
-```
-
-**✅ Verify:**
-```bash
-# Test connection (enter your password when prompted)
-psql -U bmi_user -d bmidb -h localhost -c "SELECT 1;"
-
-# Should show:
-#  ?column?
-# ----------
-#         1
-```
-
----
-
-## Step 8: Clone/Upload Project
-
-### 8.1 Clone from Git (Option A)
-
-```bash
-cd ~
-git clone YOUR_REPO_URL single-ec2-three-tier-app
-cd single-ec2-three-tier-app
-```
-
-### 8.2 Upload via SCP (Option B)
-
-**From your local machine:**
-```bash
-# Zip project (exclude node_modules)
-zip -r bmi-app.zip . -x "*/node_modules/*" -x "*/.git/*"
-
-# Upload to EC2
-scp -i your-key.pem bmi-app.zip ubuntu@YOUR_EC2_IP:~
-
-# On EC2, extract
-unzip bmi-app.zip -d single-ec2-three-tier-app
-cd single-ec2-three-tier-app
-```
-
-**✅ Verify:**
-```bash
-ls -la
-# Should see: backend/, frontend/, README.md, etc.
-
-ls backend/src
-# Should see: server.js, routes.js, db.js, calculations.js
-
-ls frontend/src
-# Should see: App.jsx, main.jsx, api.js, etc.
-```
-
----
-
-## Step 9: Backend Configuration
-
-### 9.1 Create .env File
-
-```bash
-cd ~/single-ec2-three-tier-app/backend
-
-# Create .env file
-nano .env
-```
-
-**Add this content (replace YOUR_PASSWORD with your actual password):**
-```env
-# Database Configuration
-DATABASE_URL=postgresql://bmi_user:YOUR_PASSWORD@localhost:5432/bmidb
-
-# Alternative individual settings
-DB_USER=bmi_user
-DB_PASSWORD=YOUR_PASSWORD
-DB_NAME=bmidb
-DB_HOST=localhost
-DB_PORT=5432
-
-# Server Configuration
-PORT=3000
-NODE_ENV=production
-
-# CORS Configuration
-CORS_ORIGIN=*
-```
-
-**Save:** `Ctrl+O`, `Enter`, `Ctrl+X`
-
-### 9.2 Set Permissions
-
-```bash
-chmod 600 .env
-```
-
-**✅ Verify:**
-```bash
-cat .env                    # Should show your configuration
-ls -l .env                  # Should show: -rw------- (600)
-```
-
----
-
-## Step 10: Deploy Backend
-
-### 10.1 Install Dependencies
-
-```bash
-cd ~/single-ec2-three-tier-app/backend
-npm install --production
-```
-
-**✅ Verify:**
-```bash
-ls node_modules             # Should show many packages
-test -d node_modules/express && echo "Express installed" || echo "Missing express"
-test -d node_modules/pg && echo "PostgreSQL driver installed" || echo "Missing pg"
-```
-
-### 10.2 Run Database Migrations
-
-```bash
-cd ~/single-ec2-three-tier-app/backend
-
-# Source .env for credentials
-source .env
-
-# Run all migrations
-for migration in migrations/*.sql; do
-    if [ -f "$migration" ]; then
-        echo "Running: $(basename $migration)"
-        PGPASSWORD=$DB_PASSWORD psql -U $DB_USER -d $DB_NAME -h localhost -f "$migration"
-    fi
-done
-```
-
-**✅ Verify:**
-```bash
-# Check if table exists
-PGPASSWORD=$DB_PASSWORD psql -U bmi_user -d bmidb -h localhost -c "\d measurements"
-
-# Should show table structure with columns:
-# - id, weight_kg, height_cm, age, sex, activity_level
-# - bmi, bmi_category, bmr, daily_calories
-# - measurement_date, created_at
-```
-
-### 10.3 Test Database Connection
-
-```bash
-source .env
-PGPASSWORD=$DB_PASSWORD psql -U $DB_USER -d $DB_NAME -h localhost -c "SELECT 1;"
-```
-
-**✅ Verify:**
-```bash
-# Should show:
-#  ?column?
-# ----------
-#         1
-# (1 row)
-```
-
----
-
-## Step 11: Deploy Frontend
-
-### 11.1 Install Dependencies
-
-```bash
-cd ~/single-ec2-three-tier-app/frontend
-npm install
-```
-
-**✅ Verify:**
-```bash
-ls node_modules             # Should show many packages
-test -d node_modules/react && echo "React installed" || echo "Missing react"
-test -d node_modules/vite && echo "Vite installed" || echo "Missing vite"
-```
-
-### 11.2 Build for Production
-
-```bash
-npm run build
-```
-
-**✅ Verify:**
-```bash
-ls -la dist/                # Should show index.html and assets/
-test -f dist/index.html && echo "Build successful" || echo "Build failed"
-du -sh dist/                # Should show build size (~500KB - 1MB)
-```
-
-### 11.3 Deploy to Nginx Directory
-
-```bash
-# Create directory
-sudo mkdir -p /var/www/bmi-health-tracker
-
-# Copy built files
-sudo cp -r dist/* /var/www/bmi-health-tracker/
-
-# Set ownership
-sudo chown -R www-data:www-data /var/www/bmi-health-tracker
-
-# Set permissions
-sudo chmod -R 755 /var/www/bmi-health-tracker
-```
-
-**✅ Verify:**
-```bash
-ls -la /var/www/bmi-health-tracker/
-# Should show: index.html, assets/, etc.
-
-sudo -u www-data test -r /var/www/bmi-health-tracker/index.html && echo "Readable" || echo "Permission issue"
-```
-
----
-
-## Step 12: Configure PM2
-
-### 12.1 Start Backend with PM2
-
-```bash
-cd ~/single-ec2-three-tier-app/backend
-pm2 start src/server.js --name bmi-backend --env production
-```
-
-**✅ Verify:**
-```bash
-pm2 status
-# Should show: bmi-backend | online
-
-pm2 logs bmi-backend --lines 20
-# Should show: "Server running on port 3000" and "Connected to PostgreSQL"
-```
-
-### 12.2 Save PM2 Configuration
-
-```bash
-pm2 save
-```
-
-**✅ Verify:**
-```bash
-cat ~/.pm2/dump.pm2
-# Should show saved process list
-```
-
-### 12.3 Setup PM2 Auto-start on Reboot
-
-```bash
-pm2 startup systemd -u ubuntu --hp /home/ubuntu
-```
-
-**Copy and run the command shown in output** (it will look like):
-```bash
-sudo env PATH=$PATH:/home/ubuntu/.nvm/versions/node/v20.x.x/bin ...
-```
-
-**✅ Verify:**
-```bash
-systemctl status pm2-ubuntu
-# Should show: active (exited)
-
-# Simulate reboot test
-pm2 resurrect
-```
-
-### 12.4 Test Backend API
-
-```bash
-curl http://localhost:3000/health
-# Should show: {"status":"ok","database":"connected"}
-
-curl http://localhost:3000/api/measurements
-# Should show: {"rows":[]}
-```
-
-**✅ Verify:**
-```bash
-# Test with all endpoints
-curl -s http://localhost:3000/health | grep -q "ok" && echo "Health check OK" || echo "Health check FAILED"
-```
-
----
-
-## Step 13: Configure Nginx
-
-### 13.1 Get EC2 Public IP
-
-```bash
-# Method 1: IMDSv2 (recommended)
-TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
-  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-  http://169.254.169.254/latest/meta-data/public-ipv4)
-echo "Your Public IP: $PUBLIC_IP"
-
-# Method 2: From AWS Console
-# Copy from EC2 instance details
-```
-
-### 13.2 Create Nginx Configuration
-
-```bash
-sudo nano /etc/nginx/sites-available/bmi-health-tracker
-```
-
-**Add this configuration (replace YOUR_IP or use _ for catch-all):**
-```nginx
-server {
-    listen 80;
-    listen [::]:80;
-    
-    server_name YOUR_EC2_PUBLIC_IP;  # Or use _ for catch-all
-
-    # Frontend static files
-    root /var/www/bmi-health-tracker;
-    index index.html;
-
-    # Compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css text/xml text/javascript 
-               application/x-javascript application/xml+rss 
-               application/javascript application/json;
-
-    # Frontend routing (React Router)
-    location / {
-        try_files $uri $uri/ /index.html;
-        
-        # Cache static assets
-        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-            expires 1y;
-            add_header Cache-Control "public, immutable";
-        }
-    }
-
-    # Backend API proxy
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000/api/;
-        proxy_http_version 1.1;
-        
-        # WebSocket support
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        
-        # Standard proxy headers
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-        
-        # Disable caching for API
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-
-    # Hide nginx version
-    server_tokens off;
-
-    # Logs
-    access_log /var/log/nginx/bmi-access.log;
-    error_log /var/log/nginx/bmi-error.log;
-}
-```
-
-**Save:** `Ctrl+O`, `Enter`, `Ctrl+X`
-
-### 13.3 Enable Site
-
-```bash
-# Create symlink
-sudo ln -sf /etc/nginx/sites-available/bmi-health-tracker /etc/nginx/sites-enabled/
-
-# Remove default site
-sudo rm -f /etc/nginx/sites-enabled/default
-```
-
-**✅ Verify:**
-```bash
-ls -la /etc/nginx/sites-enabled/
-# Should show symlink to bmi-health-tracker
-
-sudo nginx -t
-# Should show: syntax is ok, test is successful
-```
-
-### 13.4 Restart Nginx
-
-```bash
-sudo systemctl restart nginx
-```
-
-**✅ Verify:**
-```bash
-sudo systemctl status nginx
-# Should show: active (running)
-
-curl -I http://localhost
-# Should show: HTTP/1.1 200 OK
-```
-
----
-
-## Step 14: Health Checks
-
-### 14.1 Test Backend Health
-
-```bash
-# Health endpoint
-curl http://localhost:3000/health
-
-# API endpoint
-curl http://localhost:3000/api/measurements
-
-# Via Nginx
-curl http://localhost/api/measurements
-```
-
-**✅ Expected:**
-```json
-{"status":"ok","database":"connected"}
-{"rows":[]}
-```
-
-### 14.2 Test Frontend
-
-```bash
-# Via Nginx
-curl -I http://localhost
-
-# Check specific files
-curl -I http://localhost/assets/
-```
-
-**✅ Expected:**
-```
-HTTP/1.1 200 OK
-Content-Type: text/html
-```
-
-### 14.3 Test Full Stack
-
-```bash
-# Create a test measurement
-curl -X POST http://localhost/api/measurements \
-  -H "Content-Type: application/json" \
-  -d '{
-    "weightKg": 70,
-    "heightCm": 175,
-    "age": 30,
-    "sex": "male",
-    "activity": "moderate",
-    "measurementDate": "2025-12-15"
-  }'
-
-# Retrieve measurements
-curl http://localhost/api/measurements
-```
-
-**✅ Expected:**
-```json
-{
-  "measurement": {
-    "id": 1,
-    "weight_kg": "70.00",
-    "bmi": "22.9",
-    ...
-  }
-}
-```
-
-### 14.4 Check PM2 Status
-
-```bash
-pm2 status
-pm2 logs bmi-backend --lines 50
-```
-
-**✅ Expected:**
-```
-┌────┬────────────────┬─────────┬─────────┬──────┬────────┐
-│ id │ name           │ mode    │ status  │ cpu  │ memory │
-├────┼────────────────┼─────────┼─────────┼──────┼────────┤
-│ 0  │ bmi-backend    │ fork    │ online  │ 0%   │ 50mb   │
-└────┴────────────────┴─────────┴─────────┴──────┴────────┘
-```
-
-### 14.5 Check Database Connection
-
-```bash
-cd ~/single-ec2-three-tier-app/backend
-source .env
-
-PGPASSWORD=$DB_PASSWORD psql -U $DB_USER -d $DB_NAME -h localhost -c \
-  "SELECT COUNT(*) FROM measurements;"
-```
-
-**✅ Expected:**
-```
- count
--------
-     1
-```
-
-### 14.6 Check Logs
-
-```bash
-# Nginx access logs
-sudo tail -f /var/log/nginx/bmi-access.log
-
-# Nginx error logs
-sudo tail -f /var/log/nginx/bmi-error.log
-
-# PM2 logs
-pm2 logs bmi-backend --lines 100
-
-# PostgreSQL logs
-sudo tail -f /var/log/postgresql/postgresql-14-main.log
-```
-
----
-
-## Step 15: SSL/HTTPS (Optional)
-
-### 15.1 Install Certbot
-
-```bash
-sudo apt install -y certbot python3-certbot-nginx
-```
-
-**✅ Verify:**
-```bash
-certbot --version
-# Should show: certbot 2.x.x
-```
-
-### 15.2 Obtain SSL Certificate
-
-**Prerequisites:**
-- Domain name pointing to your EC2 IP
-- Port 80 and 443 open in security group
-
-```bash
-# Update Nginx server_name with your domain
-sudo nano /etc/nginx/sites-available/bmi-health-tracker
-# Change: server_name YOUR_DOMAIN.com;
-
-# Test and reload
-sudo nginx -t && sudo systemctl reload nginx
-
-# Obtain certificate
-sudo certbot --nginx -d YOUR_DOMAIN.com
-```
-
-**Follow prompts:**
-1. Enter email
-2. Agree to terms
-3. Choose redirect option (2 - recommended)
-
-**✅ Verify:**
-```bash
-sudo certbot certificates
-# Should show your domain with expiry date
-
-# Test HTTPS
-curl -I https://YOUR_DOMAIN.com
-# Should show: HTTP/2 200
-```
-
-### 15.3 Test Auto-renewal
-
-```bash
-sudo certbot renew --dry-run
-```
-
-**✅ Expected:**
-```
-Congratulations, all simulated renewals succeeded
-```
-
----
-
-## Troubleshooting
-
-### Backend Issues
-
-**Problem: Backend not starting**
-```bash
-# Check logs
-pm2 logs bmi-backend --err --lines 50
-
-# Common issues:
-# 1. Database connection - check .env credentials
-# 2. Port already in use - check: sudo lsof -ti:3000
-# 3. Module missing - run: npm install
-```
-
-**Problem: Database connection failed**
-```bash
-# Test connection manually
-cd ~/single-ec2-three-tier-app/backend
-source .env
-PGPASSWORD=$DB_PASSWORD psql -U $DB_USER -d $DB_NAME -h localhost
-
-# Check pg_hba.conf
-sudo cat /etc/postgresql/14/main/pg_hba.conf | grep bmi
-
-# Reload PostgreSQL
-sudo systemctl reload postgresql
-```
-
-### Frontend Issues
-
-**Problem: 404 Not Found**
-```bash
-# Check files exist
-ls -la /var/www/bmi-health-tracker/
-
-# Check permissions
-sudo -u www-data test -r /var/www/bmi-health-tracker/index.html && echo "OK" || echo "FAIL"
-
-# Verify Nginx config
-sudo nginx -t
-```
-
-**Problem: White screen / blank page**
-```bash
-# Check browser console for errors
-# Check if API is accessible
-curl http://YOUR_IP/api/measurements
-
-# Check Nginx error logs
-sudo tail -f /var/log/nginx/bmi-error.log
-```
-
-### Nginx Issues
-
-**Problem: 502 Bad Gateway**
-```bash
-# Check backend is running
-pm2 status
-curl http://localhost:3000/health
-
-# Check Nginx config
-sudo nginx -t
-
-# Check logs
-sudo tail -f /var/log/nginx/bmi-error.log
-```
-
-**Problem: Configuration test failed**
-```bash
-# Check syntax
-sudo nginx -t
-
-# Common issues:
-# - Missing semicolon
-# - Invalid server_name
-# - Wrong proxy_pass URL
-
-# View specific error
-sudo nginx -t 2>&1 | tail -5
-```
-
-### PM2 Issues
-
-**Problem: Process not restarting on reboot**
-```bash
-# Reinstall startup script
-pm2 unstartup
-pm2 startup systemd -u ubuntu --hp /home/ubuntu
-# Run the sudo command shown
-
-pm2 save
-sudo systemctl enable pm2-ubuntu
-```
-
-**Problem: High memory usage**
-```bash
-pm2 monit
-pm2 reload bmi-backend  # Zero-downtime reload
-```
-
-### Database Issues
-
-**Problem: Password authentication failed**
-```bash
-# Check user password
-sudo -u postgres psql -c "ALTER USER bmi_user WITH PASSWORD 'NEW_PASSWORD';"
-
-# Update .env file
-nano ~/single-ec2-three-tier-app/backend/.env
-
-# Restart backend
-pm2 restart bmi-backend
-```
-
-**Problem: Table does not exist**
-```bash
-# Run migrations again
-cd ~/single-ec2-three-tier-app/backend
-source .env
-
-for migration in migrations/*.sql; do
-    PGPASSWORD=$DB_PASSWORD psql -U $DB_USER -d $DB_NAME -h localhost -f "$migration"
-done
-```
-
-### Useful Commands
-
-```bash
-# Check all services
-systemctl status postgresql nginx
-pm2 status
-
-# Restart everything
-sudo systemctl restart postgresql nginx
-pm2 restart all
-
-# View all logs
-pm2 logs bmi-backend --lines 100
-sudo tail -f /var/log/nginx/bmi-*.log
-
-# Check disk space
-df -h
-
-# Check memory
-free -h
-
-# Check processes
-ps aux | grep -E 'node|nginx|postgres'
-
-# Test network connectivity
-curl http://localhost:3000/health
-curl http://localhost/api/measurements
-curl http://YOUR_IP
-```
-
----
-
-## Summary Checklist
-
-After completing all steps, verify:
-
-- [ ] ✅ EC2 instance running
-- [ ] ✅ Node.js installed via NVM
-- [ ] ✅ PostgreSQL installed and running
-- [ ] ✅ Nginx installed and running
-- [ ] ✅ PM2 installed
-- [ ] ✅ Database created with correct user/password
-- [ ] ✅ pg_hba.conf configured for md5 authentication
-- [ ] ✅ Project files uploaded/cloned
-- [ ] ✅ Backend .env file created with correct credentials
-- [ ] ✅ Backend dependencies installed
-- [ ] ✅ Database migrations applied
-- [ ] ✅ Frontend dependencies installed
-- [ ] ✅ Frontend built successfully
-- [ ] ✅ Frontend deployed to /var/www/bmi-health-tracker
-- [ ] ✅ PM2 running backend
-- [ ] ✅ PM2 configured for auto-start
-- [ ] ✅ Nginx configured with reverse proxy
-- [ ] ✅ Health checks passing
-- [ ] ✅ Application accessible via browser
-- [ ] ✅ API endpoints working
-- [ ] ✅ Database queries working
-- [ ] ✅ SSL certificate installed (optional)
-
----
-
-## Application Access
-
-**URL:** `http://YOUR_EC2_PUBLIC_IP`  
-**API:** `http://YOUR_EC2_PUBLIC_IP/api/measurements`  
-**Health:** `http://YOUR_EC2_PUBLIC_IP/api/health`
-
----
-
-## Useful Commands Reference
-
-### PM2 Commands
-```bash
-pm2 status                    # View process status
-pm2 logs bmi-backend         # View logs
-pm2 restart bmi-backend      # Restart process
-pm2 stop bmi-backend         # Stop process
-pm2 start bmi-backend        # Start process
-pm2 delete bmi-backend       # Remove process
-pm2 save                      # Save current process list
-pm2 monit                     # Monitor CPU/Memory
-```
-
-### Nginx Commands
-```bash
-sudo nginx -t                           # Test configuration
-sudo systemctl start nginx              # Start Nginx
-sudo systemctl stop nginx               # Stop Nginx
-sudo systemctl restart nginx            # Restart Nginx
-sudo systemctl reload nginx             # Reload config
-sudo systemctl status nginx             # Check status
-```
-
-### PostgreSQL Commands
-```bash
-sudo systemctl start postgresql         # Start PostgreSQL
-sudo systemctl stop postgresql          # Stop PostgreSQL
-sudo systemctl restart postgresql       # Restart PostgreSQL
-sudo systemctl status postgresql        # Check status
-sudo -u postgres psql                   # Enter PostgreSQL prompt
-psql -U bmi_user -d bmidb -h localhost # Connect as app user
-```
-
-### Database Backup
-```bash
-# Backup database
-PGPASSWORD=YOUR_PASSWORD pg_dump -U bmi_user -h localhost bmidb > backup_$(date +%Y%m%d).sql
-
-# Restore database
-PGPASSWORD=YOUR_PASSWORD psql -U bmi_user -d bmidb -h localhost < backup_20251215.sql
-```
-
----
-
-**Deployment Complete!** 🎉
-
-Your BMI Health Tracker application should now be running at `http://YOUR_EC2_PUBLIC_IP`
-
-**Next Steps:**
-1. Test all features in the browser
-2. Set up SSL with Let's Encrypt (if using domain)
-3. Configure regular database backups
-4. Set up monitoring (optional)
-5. Configure firewall rules (UFW)
-
----
-
-**Last Updated:** December 15, 2025  
-**Version:** 2.0.0  
-**Compatible with:** IMPLEMENTATION_AUTO.sh v2.0.0
-
----
-## 🧑‍💻 Author
-**Md. Sarowar Alam**  
-Lead DevOps Engineer, Hogarth Worldwide  
-📧 Email: sarowar@hotmail.com  
-🔗 LinkedIn: [linkedin.com/in/sarowar](https://www.linkedin.com/in/sarowar/)  
----
+# Install PostgreSQL
 sudo apt install -y postgresql postgresql-contrib
 
 # Start and enable PostgreSQL service
@@ -1250,12 +214,26 @@ Replace `YOUR_DB_PASSWORD` with the password you created for `bmi_user`.
 npm install --production
 ```
 
-**Run database migration:**
+**Run database migrations:**
 ```bash
-# Apply the schema to create the measurements table
+# Apply migrations in order to create and update the measurements table
+
+# Migration 001: Create measurements table
 psql -U bmi_user -d bmidb -h localhost -f migrations/001_create_measurements.sql
 # Enter password when prompted
+
+# Migration 002: Add measurement_date column for custom date tracking
+psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
+# Enter password when prompted
+
+# Verify migrations were successful
+psql -U bmi_user -d bmidb -h localhost -c "\d measurements"
+# You should see the measurements table structure with measurement_date column
 ```
+
+**What these migrations do:**
+- **Migration 001**: Creates the `measurements` table with all health metrics (BMI, BMR, calories, etc.)
+- **Migration 002**: Adds the `measurement_date` column to allow users to specify when a measurement was taken (not just when it was recorded)
 
 **Test backend locally (optional):**
 ```bash
@@ -1563,14 +541,36 @@ Visit `https://YOUR_DOMAIN` in your browser. You should see a padlock icon.
 ### 9.1 Test Backend API
 
 ```bash
-# Test from server
+# Test health endpoint
+curl http://localhost:3000/health
+# Expected: {"status":"ok","environment":"production"}
+
+# Test get all measurements
 curl http://localhost:3000/api/measurements
+# Expected: {"rows":[]} (empty array initially)
+
+# Test creating a measurement with custom date
+curl -X POST http://localhost:3000/api/measurements \
+  -H "Content-Type: application/json" \
+  -d '{
+    "weightKg": 70,
+    "heightCm": 175,
+    "age": 30,
+    "sex": "male",
+    "activity": "moderate",
+    "measurementDate": "2025-12-15"
+  }'
+
+# Expected response includes calculated values:
+# {"measurement":{"id":1,"bmi":"22.9","bmi_category":"Normal","bmr":1732,"daily_calories":2685,...}}
 
 # Test from public internet (replace with your IP/domain)
 curl http://YOUR_EC2_PUBLIC_IP/api/measurements
-```
 
-Expected response: `{"rows":[]}` (empty array initially)
+# Test 30-day trends endpoint
+curl http://localhost:3000/api/measurements/trends
+# Returns BMI averages grouped by date for the last 30 days
+```
 
 ### 9.2 Test Frontend
 
@@ -1580,11 +580,23 @@ Open browser and navigate to:
 - `https://YOUR_DOMAIN` (if SSL configured)
 
 **Check these features:**
-1. ✅ Form displays with all 5 input fields
-2. ✅ Submit a measurement
-3. ✅ Measurement appears in the recent list
-4. ✅ Trend chart displays (may be empty initially)
-5. ✅ Check browser console for errors (F12)
+1. ✅ Form displays with all 6 input fields:
+   - **Measurement Date** (new feature! allows entering historical data)
+   - Weight (kg)
+   - Height (cm)
+   - Age (years)
+   - Biological Sex
+   - Activity Level
+2. ✅ Submit a measurement (defaults to today's date, but you can change it)
+3. ✅ Measurement appears in the recent list with the specified date
+4. ✅ Stats cards display current BMI, BMR, and daily calorie needs
+5. ✅ Trend chart displays (shows 30-day BMI trends)
+6. ✅ Check browser console for errors (F12)
+
+**Test the measurement date feature:**
+- Try entering a measurement from a past date (e.g., last week)
+- Verify it appears with the correct date in the measurements list
+- The date field has a max limit (cannot select future dates)
 
 ### 9.3 Test Database
 
@@ -1592,15 +604,29 @@ Open browser and navigate to:
 # Connect to database
 psql -U bmi_user -d bmidb -h localhost
 
-# View all measurements
-SELECT * FROM measurements;
+# View all measurements with dates
+SELECT id, weight_kg, height_cm, bmi, bmi_category, measurement_date, created_at 
+FROM measurements 
+ORDER BY measurement_date DESC;
+
+# View 30-day BMI trends (same query the chart uses)
+SELECT measurement_date AS day, AVG(bmi) AS avg_bmi 
+FROM measurements
+WHERE measurement_date >= CURRENT_DATE - interval '30 days' 
+GROUP BY measurement_date 
+ORDER BY measurement_date;
 
 # Count total measurements
 SELECT COUNT(*) FROM measurements;
 
+# View table structure (verify measurement_date column exists)
+\d measurements
+
 # Exit
 \q
 ```
+
+**Note:** The `measurement_date` column allows users to track when measurements were actually taken, which is different from `created_at` (when the record was entered into the system).
 
 ### 9.4 Monitor Logs
 
@@ -1719,7 +745,44 @@ curl http://YOUR_EC2_PUBLIC_IP
 # Check Nginx error logs
 sudo tail -50 /var/log/nginx/bmi-error.log
 ```
+### 10.3 Common Issues
 
+**Problem: Measurement dates not showing correctly**
+```bash
+# Check if migration 002 was applied
+psql -U bmi_user -d bmidb -h localhost -c "\d measurements" | grep measurement_date
+
+# If column is missing, run migration 002:
+cd /home/ubuntu/bmi-health-tracker/backend
+psql -U bmi_user -d bmidb -h localhost -f migrations/002_add_measurement_date.sql
+
+# Restart backend
+pm2 restart bmi-backend
+```
+
+**Problem: Cannot select dates in the form**
+```bash
+# Verify frontend is properly deployed
+ls -la /var/www/bmi-health-tracker/
+
+# Check for JavaScript errors in browser console (F12)
+# Rebuild and redeploy if needed:
+cd /home/ubuntu/bmi-health-tracker/frontend
+npm run build
+sudo cp -r dist/* /var/www/bmi-health-tracker/
+sudo chown -R www-data:www-data /var/www/bmi-health-tracker
+```
+
+**Problem: Backend not accepting measurementDate field**
+```bash
+# Check backend code is current
+cd /home/ubuntu/bmi-health-tracker/backend
+grep -r "measurementDate" src/routes.js
+
+# If not found, ensure you have the latest code
+# Then restart:
+pm2 restart bmi-backend
+```
 ### 10.3 Backup Database
 
 ```bash
@@ -1949,5 +1012,6 @@ psql -U bmi_user -d bmidb -h localhost
 
 ---
 
-**Last Updated**: December 12, 2025  
-**Version**: 2.0
+**Last Updated**: December 16, 2025  
+**Version**: 2.1  
+**Changes**: Updated to include measurement_date feature (Migration 002), enhanced testing procedures, and current project state

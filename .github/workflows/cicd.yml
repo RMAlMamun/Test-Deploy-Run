@@ -74,13 +74,16 @@ jobs:
           cat downloaded-artifacts/test-results.txt
 
       - name: Deploy to EC2 (3-tier)
+        shell: bash
         run: |
-          set -e
-          sudo mkdir -p /opt/Test-Deploy-Run
-          sudo chown -R "$USER":"$USER" /opt/Test-Deploy-Run
+          set -euo pipefail
 
-          rsync -a --delete ./ /opt/Test-Deploy-Run
-          cd /opt/Test-Deploy-Run
+          APP_DIR=/opt/Test-Deploy-Run
+          sudo mkdir -p "$APP_DIR"
+          sudo chown -R "$USER":"$USER" "$APP_DIR"
+
+          rsync -a --delete ./ "$APP_DIR"
+          cd "$APP_DIR"
 
           chmod +x IMPLEMENTATION_AUTO.sh
-          printf "y\nbmidb\nbmi_user\123456\n" | sudo bash ./IMPLEMENTATION_AUTO.sh
+          printf "y\nbmidb\nbmi_user\123456\n" | sudo -E bash ./IMPLEMENTATION_AUTO.sh

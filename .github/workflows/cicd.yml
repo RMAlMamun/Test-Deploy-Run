@@ -81,9 +81,34 @@ jobs:
           APP_DIR=/opt/Test-Deploy-Run
           sudo mkdir -p "$APP_DIR"
           sudo chown -R "$USER":"$USER" "$APP_DIR"
-
+          
           rsync -a --delete ./ "$APP_DIR"
           cd "$APP_DIR"
 
           chmod +x IMPLEMENTATION_AUTO.sh
-          printf "y\nbmidb\nbmi_user\123456\n" | sudo -E bash ./IMPLEMENTATION_AUTO.sh
+
+          sudo apt-get update -y
+          sudo apt-get install -y expect
+
+          expect << 'EOF'
+          set timeout -1
+          spawn sudo bash ./IMPLEMENTATION_AUTO.sh
+
+          expect {
+          -re "Continue with deployment\\? \\(y/n\\):" { send "y\r" }
+          }
+
+          expect {
+          -re "Database name.*:" { send "bmidb\r" }
+          }
+
+          expect {
+          -re "Database user.*:" { send "bmi_user\r" }
+          }
+          
+          expect {
+          -re "Database password.*:" { send "123456\r" }
+          timeout { }
+          }
+          expect eof
+          EOF

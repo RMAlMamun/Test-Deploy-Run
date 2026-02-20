@@ -81,7 +81,7 @@ jobs:
           APP_DIR=/opt/Test-Deploy-Run
           sudo mkdir -p "$APP_DIR"
           sudo chown -R "$USER":"$USER" "$APP_DIR"
-          
+
           rsync -a --delete ./ "$APP_DIR"
           cd "$APP_DIR"
 
@@ -92,23 +92,31 @@ jobs:
 
           expect << 'EOF'
           set timeout -1
-          spawn sudo bash ./IMPLEMENTATION_AUTO.sh
+          log_user 1
+
+          spawn sudo -E bash ./IMPLEMENTATION_AUTO.sh
 
           expect {
-          -re "Continue with deployment\\? \\(y/n\\):" { send "y\r" }
+          -re {Continue with deployment\\? \\(y/n\\):} { send "y\r" }
+          timeout { exit 1 }
           }
 
           expect {
-          -re "Database name.*:" { send "bmidb\r" }
+          -re {Database name.*:.*Database iser/*:}{
+            send "bmidb\r"
+            send "bmi_user\r"
+            }
+            -re {Database name.*:} {
+                send "bmidb\r"
+                expect -re {Database user.*:}
+                    Send "bmi_user\r"
+                }
+                    timeout { exit 1 }
           }
-
-          expect {
-          -re "Database user.*:" { send "bmi_user\r" }
-          }
-          
-          expect {
-          -re "Database password.*:" { send "123456\r" }
-          timeout { }
-          }
+                    expect {
+                    -re {Database password.*:} { send "123456\r" }
+                    timeout { }
+                    }
+         
           expect eof
           EOF

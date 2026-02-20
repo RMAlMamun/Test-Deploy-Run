@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: self-hosted
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,10 +17,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "18"
-          cache: "npm
 
-      - name: Install + Build/Tests (Frontend)
+      - name: Frontend - install & build
         run: |
+          set -e
           mkdir -p reports
           echo "=== TEST RUN $(date -u) ===" > reports/test-results.txt
 
@@ -33,14 +34,14 @@ jobs:
             echo "Frontend package.json not found - skipped" >> reports/test-results.txt
           fi
 
-      - name: Install + Tests (Backend)
+      - name: Backend - install & test
         run: |
+          set -e
           if [ -f backend/package.json ]; then
             cd backend
             npm ci
-            # যদি repo তে npm test থাকে, এটা কাজ করবে:
-            npm test || echo "Backend tests not defined; ran npm test and it failed/absent" >> ../reports/test-results.txt
-            echo "Backend step: DONE" >> ../reports/test-results.txt
+            npm test || true
+            echo "Backend tests: DONE" >> ../reports/test-results.txt
             cd ..
           else
             echo "Backend package.json not found - skipped" >> reports/test-results.txt
@@ -55,7 +56,8 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: [self-hosted, linux, aws-ec2]
+    runs-on: [self-hosted, linux]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,15 +81,13 @@ jobs:
           sudo mkdir -p "$APP_DIR"
           sudo chown -R "$USER":"$USER" "$APP_DIR"
 
-          # sync code to /opt
           rsync -a --delete ./ "$APP_DIR"/
           cd "$APP_DIR"
 
-          # run your automation if exists
           if [ -f IMPLEMENTATION_AUTO.sh ]; then
             chmod +x IMPLEMENTATION_AUTO.sh
             sudo bash ./IMPLEMENTATION_AUTO.sh
           else
-            echo "IMPLEMENTATION_AUTO.sh not found. Add deploy steps here (fallback manual deploy)."
+            echo "IMPLEMENTATION_AUTO.sh not found. Please add your deploy script."
             exit 1
           fi

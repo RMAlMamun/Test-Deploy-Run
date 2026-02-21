@@ -62,17 +62,24 @@ jobs:
     runs-on: self-hosted
     defaults:
       run:
-         shell: bash
-        steps:
+        shell: bash
+
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
-        - name: Download test results artifact
+
+      - name: Download test results artifact
         uses: actions/download-artifact@v4
         with:
           name: test-results
           path: downloaded-artifacts
 
-          -name: Deploy to EC2 (3-tier) with Expect
+      - name: Display artifact content
+        run: |
+          echo "===== Artifact Content ====="
+          cat downloaded-artifacts/test-results.txt
+
+      - name: Deploy to EC2 (3-tier) with Expect
         env:
           APP_DIR: /opt/Test-Deploy-Run
           DB_NAME: bmidb
@@ -81,53 +88,61 @@ jobs:
         run: |
           set -euo pipefail
 
-           if ! command -v rsync >/dev/null 2>&1; then
+          # Ensure rsync exists
+          if ! command -v rsync >/dev/null 2>&1; then
             sudo apt-get update -y
             sudo apt-get install -y rsync
           fi
 
-           sudo mkdir -p "$APP_DIR"
-           sudo chown -R "$USER":"$USER" "$APP_DIR"
+          # Prepare app directory
+          sudo mkdir -p "$APP_DIR"
+          sudo chown -R "$USER":"$USER" "$APP_DIR"
 
-           rsync -a --delete ./ "$APP_DIR"/
-           cd "$APP_DIR"
+          # Sync repo into /opt (IMPORTANT: trailing slash)
+          rsync -a --delete ./ "$APP_DIR"/
+          cd "$APP_DIR"
 
           chmod +x IMPLEMENTATION_AUTO.sh
 
-           sudo apt-get update -y
-           sudo apt-get install -y expect
+          # Install expect (non-interactive automation)
+          sudo apt-get update -y
+          sudo apt-get install -y expect
 
-          # fallback if secret not set (optional)
+          # If you didn't set secret, fallback (not recommended)
           if [ -z "${DB_PASSWORD:-}" ]; then
             DB_PASSWORD="123456"
           fi
 
-           expect <<EOF
+          # Run interactive script with robust prompt matching
+          expect <<EOF
           set timeout -1
           log_user 1
 
           spawn sudo -E bash ./IMPLEMENTATION_AUTO.sh
 
-           expect {
+          # Continue prompt
+          expect {
             -re {Continue with deployment\\?\\s*\\(y/n\\):} { send "y\\r" }
             timeout { exit 1 }
           }
 
-           expect {
+          # Database prompts may appear combined or separate
+          expect {
             -re {Database name.*:.*Database user.*:} {
-              send "\$env(DB_NAME)\\r"
-              send "\$env(DB_USER)\\r"
+              send "$env(DB_NAME)\\r"
+              send "$env(DB_USER)\\r"
             }
             -re {Database name.*:} {
-              send "\$env(DB_NAME)\\r"
+              send "$env(DB_NAME)\\r"
               expect -re {Database user.*:}
-              send "\$env(DB_USER)\\r"
+              send "$env(DB_USER)\\r"
             }
             timeout { exit 1 }
           }
 
-            expect {
-            -re {Database password.*:} { send "\$env(DB_PASSWORD)\\r" }
+          # Optional password prompt (only if script asks)
+          expect {
+            -re {Database password.*:} { send "$env(DB_PASSWORD)\\r" }
             timeout { }
           }
 

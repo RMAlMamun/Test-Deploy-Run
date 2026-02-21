@@ -56,7 +56,7 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: [self-hosted, linux]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout

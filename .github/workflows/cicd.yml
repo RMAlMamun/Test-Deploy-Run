@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -20,7 +23,7 @@ jobs:
 
       - name: Frontend - install & build
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p reports
           echo "=== TEST RUN $(date -u) ===" > reports/test-results.txt
 
@@ -36,7 +39,7 @@ jobs:
 
       - name: Backend - install & test
         run: |
-          set -e
+          set -euo pipefail
           if [ -f backend/package.json ]; then
             cd backend
             npm ci
@@ -57,6 +60,9 @@ jobs:
   deploy:
     needs: test
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -73,50 +79,72 @@ jobs:
           echo "===== Artifact Content ====="
           cat downloaded-artifacts/test-results.txt
 
-      - name: Deploy to EC2 (3-tier)
-        shell: bash
+      - name: Deploy to EC2 (3-tier) with Expect
+        env:
+          APP_DIR: /opt/Test-Deploy-Run
+          DB_NAME: bmidb
+          DB_USER: bmi_user
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           set -euo pipefail
 
-          APP_DIR=/opt/Test-Deploy-Run
+          # Ensure rsync exists
+          if ! command -v rsync >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y rsync
+          fi
+
+          # Prepare app directory
           sudo mkdir -p "$APP_DIR"
           sudo chown -R "$USER":"$USER" "$APP_DIR"
 
-          rsync -a --delete ./ "$APP_DIR"
+          # Sync repo into /opt (IMPORTANT: trailing slash)
+          rsync -a --delete ./ "$APP_DIR"/
           cd "$APP_DIR"
 
           chmod +x IMPLEMENTATION_AUTO.sh
 
+          # Install expect (non-interactive automation)
           sudo apt-get update -y
           sudo apt-get install -y expect
 
-          expect << 'EOF'
+          # If you didn't set secret, fallback (not recommended)
+          if [ -z "${DB_PASSWORD:-}" ]; then
+            DB_PASSWORD="123456"
+          fi
+
+          # Run interactive script with robust prompt matching
+          expect <<EOF
           set timeout -1
           log_user 1
 
           spawn sudo -E bash ./IMPLEMENTATION_AUTO.sh
 
+          # Continue prompt
           expect {
-          -re {Continue with deployment\\? \\(y/n\\):} { send "y\r" }
-          timeout { exit 1 }
+            -re {Continue with deployment\\?\\s*\\(y/n\\):} { send "y\\r" }
+            timeout { exit 1 }
           }
 
+          # Database prompts may appear combined or separate
           expect {
-          -re {Database name.*:.*Database iser/*:}{
-            send "bmidb\r"
-            send "bmi_user\r"
+            -re {Database name.*:.*Database user.*:} {
+              send "$env(DB_NAME)\\r"
+              send "$env(DB_USER)\\r"
             }
             -re {Database name.*:} {
-                send "bmidb\r"
-                expect -re {Database user.*:}
-                    Send "bmi_user\r"
-                }
-                    timeout { exit 1 }
+              send "$env(DB_NAME)\\r"
+              expect -re {Database user.*:}
+              send "$env(DB_USER)\\r"
+            }
+            timeout { exit 1 }
           }
-                    expect {
-                    -re {Database password.*:} { send "123456\r" }
-                    timeout { }
-                    }
-         
+
+          # Optional password prompt (only if script asks)
+          expect {
+            -re {Database password.*:} { send "$env(DB_PASSWORD)\\r" }
+            timeout { }
+          }
+
           expect eof
-          EOF
+EOF
